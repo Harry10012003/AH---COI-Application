@@ -1,0 +1,10 @@
+flask>=3.0
+openpyxl>=3.1
+requests>=2.31
+playwright>=1.53
+pymssql>=2.3
+DBUtils>=3.0
+beautifulsoup4>=4.12
+waitress>=3.0
+pywin32>=311
+python-dotenv>=1.0
