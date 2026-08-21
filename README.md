@@ -1,4 +1,33 @@
-# TEST COI Application
+# COI Total
+
+`COI Total` is the combined COI web application. It has one authenticated COI menu with two workspaces:
+
+- **Pre-COI**: creates and updates `COI Master.xlsx` through browser upload/download.
+- **COI Process**: the existing GO selector and COI workspace.
+
+## Run locally
+
+```powershell
+py -3 -m venv venv
+.\venv\Scripts\Activate.ps1
+py -m pip install -r requirements.txt
+cd frontend
+npm ci
+npm run build
+cd ..
+py -m backend.server --host 127.0.0.1 --port 5070
+```
+
+Open `http://127.0.0.1:5070`.
+
+## Pre-COI web behavior
+
+- Browser users upload an existing `.xlsx` for **Update YY Req No** and **Update PPO Qty From Excel**.
+- Finished files are downloaded by the browser; the server keeps each temporary job artifact only briefly and never returns a local path.
+- YPD credentials are transient for the current job. The web app does not persist a YPD password.
+- Configure SQL credentials through the existing `.env`/Windows Credential Manager flow. Do not put credentials in `backend/precoi/clients.py`.
+
+# Existing COI Process documentation
 
 Web app thay thế Excel workflow cho COI preview, Fabric Left matching, và source validation (GO, PPO, GW, MES).
 

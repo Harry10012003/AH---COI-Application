@@ -1090,6 +1090,10 @@ def _display_shipment_qty(item: dict | None) -> float:
     return max(_to_float((item or {}).get("shipment_qty")) - _to_float((item or {}).get("foc_qty")), 0.0)
 
 
+def _sheet_cutting_priority(item: dict | None) -> int:
+    return 0 if str((item or {}).get("CUTTING STATUS") or "").strip().upper() == "CUTTED" else 1
+
+
 def _required_qty_from_ppo_yy(
     garment_qty: object,
     ppo_yy: object,
@@ -9643,6 +9647,7 @@ def _compute_pool_system_allocations(rows: list[dict], total_available: float, r
 
     system_rows.sort(
         key=lambda item: (
+            _sheet_cutting_priority(item),
             item["__due_sort_key"],
             0 if _to_float(item.get("Required Q'ty (Yds)")) < 200.0 else 1,
             item["__storage"]["lot_no"],
@@ -9658,6 +9663,7 @@ def _compute_pool_system_allocations(rows: list[dict], total_available: float, r
 
     system_rows.sort(
         key=lambda item: (
+            _sheet_cutting_priority(item),
             item["__due_sort_key"],
             item["__storage"]["lot_no"],
             item["JOB ORDER NO"],
@@ -9676,6 +9682,7 @@ def _compute_pool_system_allocations(rows: list[dict], total_available: float, r
     if remaining > 0 and system_rows:
         system_rows.sort(
             key=lambda item: (
+                _sheet_cutting_priority(item),
                 item["__due_sort_key"],
                 item["__storage"]["lot_no"],
                 item["JOB ORDER NO"],
