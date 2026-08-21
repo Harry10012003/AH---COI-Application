@@ -9643,7 +9643,6 @@ def _compute_pool_system_allocations(rows: list[dict], total_available: float, r
 
     system_rows.sort(
         key=lambda item: (
-            _sheet_cutting_priority(item),
             item["__due_sort_key"],
             0 if _to_float(item.get("Required Q'ty (Yds)")) < 200.0 else 1,
             item["__storage"]["lot_no"],
@@ -9659,7 +9658,6 @@ def _compute_pool_system_allocations(rows: list[dict], total_available: float, r
 
     system_rows.sort(
         key=lambda item: (
-            _sheet_cutting_priority(item),
             item["__due_sort_key"],
             item["__storage"]["lot_no"],
             item["JOB ORDER NO"],
@@ -9678,7 +9676,6 @@ def _compute_pool_system_allocations(rows: list[dict], total_available: float, r
     if remaining > 0 and system_rows:
         system_rows.sort(
             key=lambda item: (
-                _sheet_cutting_priority(item),
                 item["__due_sort_key"],
                 item["__storage"]["lot_no"],
                 item["JOB ORDER NO"],

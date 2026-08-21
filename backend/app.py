@@ -553,6 +553,8 @@ def frontend_public_asset():
 
 @app.route("/<path:path>")
 def spa_fallback(path: str):
+    if str(path or "").lstrip("/").startswith("api/"):
+        return jsonify({"ok": False, "error": "Not found"}), 404
     dist_index = FRONTEND_DIR / "dist" / "index.html"
     if dist_index.exists():
         return send_from_directory(str(FRONTEND_DIR / "dist"), "index.html")

@@ -172,6 +172,34 @@ class CoiStockBalanceAllocationTests(unittest.TestCase):
             ),
         )
 
+    def test_system_allocation_sort_no_longer_depends_on_removed_cutting_status(self) -> None:
+        later = {
+            "Required Q'ty (Yds)": 80.0,
+            "AH Allocate Q'ty (yds)": "",
+            "__issue_locked_qty": 0.0,
+            "__target_qty": 80.0,
+            "__due_sort_key": "2026-09-20",
+            "__storage": {"lot_no": 2},
+            "JOB ORDER NO": "26V04414VN02",
+        }
+        earlier = {
+            "Required Q'ty (Yds)": 70.0,
+            "AH Allocate Q'ty (yds)": "",
+            "__issue_locked_qty": 0.0,
+            "__target_qty": 70.0,
+            "__due_sort_key": "2026-09-10",
+            "__storage": {"lot_no": 1},
+            "JOB ORDER NO": "26V04414VN01",
+        }
+
+        allocations = engine._compute_pool_system_allocations(
+            [later, earlier],
+            total_available=100.0,
+        )
+
+        self.assertEqual(allocations[id(earlier)], 70.0)
+        self.assertEqual(allocations[id(later)], 30.0)
+
 
 if __name__ == "__main__":
     unittest.main()
