@@ -172,33 +172,32 @@ class CoiStockBalanceAllocationTests(unittest.TestCase):
             ),
         )
 
-    def test_system_allocation_sort_no_longer_depends_on_removed_cutting_status(self) -> None:
-        later = {
-            "Required Q'ty (Yds)": 80.0,
+    def test_pool_allocation_prioritizes_cutted_rows(self) -> None:
+        cutted = {
+            "CUTTING STATUS": "CUTTED",
+            "__issue_locked_qty": 0,
             "AH Allocate Q'ty (yds)": "",
-            "__issue_locked_qty": 0.0,
-            "__target_qty": 80.0,
-            "__due_sort_key": "2026-09-20",
-            "__storage": {"lot_no": 2},
-            "JOB ORDER NO": "26V04414VN02",
+            "__due_sort_key": (2026, 2, 1, 0, 0, 0),
+            "__storage": {"lot_no": "2"},
+            "JOB ORDER NO": "JO-CUTTED",
+            "Required Q'ty (Yds)": 50,
+            "__target_qty": 50,
         }
-        earlier = {
-            "Required Q'ty (Yds)": 70.0,
+        pending = {
+            "CUTTING STATUS": "PENDING",
+            "__issue_locked_qty": 0,
             "AH Allocate Q'ty (yds)": "",
-            "__issue_locked_qty": 0.0,
-            "__target_qty": 70.0,
-            "__due_sort_key": "2026-09-10",
-            "__storage": {"lot_no": 1},
-            "JOB ORDER NO": "26V04414VN01",
+            "__due_sort_key": (2026, 1, 1, 0, 0, 0),
+            "__storage": {"lot_no": "1"},
+            "JOB ORDER NO": "JO-PENDING",
+            "Required Q'ty (Yds)": 50,
+            "__target_qty": 50,
         }
 
-        allocations = engine._compute_pool_system_allocations(
-            [later, earlier],
-            total_available=100.0,
-        )
+        allocations = engine._compute_pool_system_allocations([pending, cutted], total_available=50)
 
-        self.assertEqual(allocations[id(earlier)], 70.0)
-        self.assertEqual(allocations[id(later)], 30.0)
+        self.assertEqual(allocations[id(cutted)], 50.0)
+        self.assertEqual(allocations[id(pending)], 0.0)
 
 
 if __name__ == "__main__":

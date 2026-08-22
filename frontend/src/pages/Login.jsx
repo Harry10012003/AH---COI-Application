@@ -33,7 +33,7 @@ export default function Login() {
     <div className="login-page">
       <div className="login-shell">
         <div className="login-brand">
-          <img src="/favicon.svg" alt="Tessellation" className="login-logo" />
+          <img src="/logotes.svg" alt="Tessellation logo" className="login-logo" />
           <h1>COI Application System</h1>
           <p>Fabric Control &amp; Order Information</p>
         </div>
