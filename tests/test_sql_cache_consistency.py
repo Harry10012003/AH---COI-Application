@@ -495,6 +495,174 @@ class SqlCacheConsistencyTests(unittest.TestCase):
         self.assertEqual(volatile_meta_count, 0)
         self.assertEqual(go_meta["source_status"], "OK")
 
+    def test_empty_live_topology_retains_last_known_good_rows(self) -> None:
+        stamp = "2026-07-27 09:05:00"
+        self._insert_feed_and_staged_head(
+            feed_stamp=stamp,
+            staged_stamp=stamp,
+            with_ppo=True,
+        )
+        with engine._snapshot_connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO sql_go_fabric_rows (
+                    go_no, row_index, lot_no, ppo_no, fabric_type,
+                    combo_name, synced_at
+                )
+                VALUES ('GO-001', 0, 1, 'PPO-001', 'B', 'NAVY', ?)
+                """,
+                (engine._snapshot_now(),),
+            )
+            conn.commit()
+        bundle = {
+            "ok": True,
+            "head": {
+                "go_no": "GO-001",
+                "factory_code": "EGV",
+                "style_no": "STYLE-NEW",
+                "status": "OPEN",
+                "create_date": stamp,
+                "modify_date": stamp,
+            },
+            "ppo_mapping": [],
+            "fabric_rows": [],
+            "sql_bom_rows": [],
+            "jo_ppo_yy_rows": [],
+            "volatile_sources_refreshed": True,
+            "ppo_order_totals_refreshed": True,
+            "source_synced_at": engine._snapshot_now(),
+        }
+
+        self.assertTrue(engine._save_go_source_cache_bundle("GO-001", bundle))
+
+        with engine._snapshot_connect() as conn:
+            ppo_rows = conn.execute(
+                "SELECT ppo_no FROM sql_go_ppo_mapping WHERE go_no = 'GO-001'"
+            ).fetchall()
+            fabric_rows = conn.execute(
+                "SELECT ppo_no, combo_name FROM sql_go_fabric_rows WHERE go_no = 'GO-001'"
+            ).fetchall()
+            go_meta = conn.execute(
+                """
+                SELECT source_status, last_error
+                FROM sql_source_sync
+                WHERE source_key = 'GO:GO-001'
+                """
+            ).fetchone()
+
+        self.assertEqual([row["ppo_no"] for row in ppo_rows], ["PPO-001"])
+        self.assertEqual(
+            [(row["ppo_no"], row["combo_name"]) for row in fabric_rows],
+            [("PPO-001", "NAVY")],
+        )
+        self.assertEqual(bundle["source_mode"], "sqlite-source-cache")
+        self.assertFalse(bundle["volatile_sources_refreshed"])
+        self.assertEqual(go_meta["source_status"], "ERROR")
+        self.assertIn("SOURCE_INCOMPLETE", go_meta["last_error"])
+
+    def test_complete_live_topology_replaces_cached_rows(self) -> None:
+        stamp = "2026-07-27 09:05:00"
+        self._insert_feed_and_staged_head(
+            feed_stamp=stamp,
+            staged_stamp=stamp,
+            with_ppo=True,
+        )
+        bundle = {
+            "ok": True,
+            "head": {
+                "go_no": "GO-001",
+                "factory_code": "EGV",
+                "style_no": "STYLE-NEW",
+                "status": "OPEN",
+                "create_date": stamp,
+                "modify_date": stamp,
+            },
+            "ppo_mapping": [{"ppo_no": "PPO-NEW", "lot_no": 2}],
+            "fabric_rows": [
+                {
+                    "lot_no": 2,
+                    "ppo_no": "PPO-NEW",
+                    "fabric_type": "M",
+                    "combo_name": "WHITE",
+                }
+            ],
+            "sql_bom_rows": [],
+            "jo_ppo_yy_rows": [],
+            "volatile_sources_refreshed": False,
+            "ppo_order_totals_refreshed": False,
+            "source_synced_at": engine._snapshot_now(),
+        }
+
+        self.assertTrue(engine._save_go_source_cache_bundle("GO-001", bundle))
+
+        with engine._snapshot_connect() as conn:
+            ppo_rows = conn.execute(
+                "SELECT ppo_no FROM sql_go_ppo_mapping WHERE go_no = 'GO-001'"
+            ).fetchall()
+            go_meta = conn.execute(
+                "SELECT source_status FROM sql_source_sync WHERE source_key = 'GO:GO-001'"
+            ).fetchone()
+        self.assertEqual([row["ppo_no"] for row in ppo_rows], ["PPO-NEW"])
+        self.assertEqual(go_meta["source_status"], "OK")
+
+    def test_partial_live_topology_cannot_drop_only_ppo_mapping(self) -> None:
+        stamp = "2026-07-27 09:05:00"
+        self._insert_feed_and_staged_head(
+            feed_stamp=stamp,
+            staged_stamp=stamp,
+            with_ppo=True,
+        )
+        with engine._snapshot_connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO sql_go_fabric_rows (
+                    go_no, row_index, lot_no, ppo_no, fabric_type,
+                    combo_name, synced_at
+                )
+                VALUES ('GO-001', 0, 1, 'PPO-001', 'B', 'NAVY', ?)
+                """,
+                (engine._snapshot_now(),),
+            )
+            conn.commit()
+        bundle = {
+            "ok": True,
+            "head": {
+                "go_no": "GO-001",
+                "factory_code": "EGV",
+                "style_no": "STYLE-NEW",
+                "status": "OPEN",
+                "create_date": stamp,
+                "modify_date": stamp,
+            },
+            "ppo_mapping": [],
+            "fabric_rows": [
+                {
+                    "lot_no": 2,
+                    "ppo_no": "PPO-PARTIAL",
+                    "fabric_type": "M",
+                    "combo_name": "WHITE",
+                }
+            ],
+            "sql_bom_rows": [],
+            "jo_ppo_yy_rows": [],
+            "volatile_sources_refreshed": False,
+            "ppo_order_totals_refreshed": False,
+            "source_synced_at": engine._snapshot_now(),
+        }
+
+        self.assertTrue(engine._save_go_source_cache_bundle("GO-001", bundle))
+
+        with engine._snapshot_connect() as conn:
+            ppo_rows = conn.execute(
+                "SELECT ppo_no FROM sql_go_ppo_mapping WHERE go_no = 'GO-001'"
+            ).fetchall()
+            fabric_rows = conn.execute(
+                "SELECT ppo_no FROM sql_go_fabric_rows WHERE go_no = 'GO-001'"
+            ).fetchall()
+        self.assertEqual([row["ppo_no"] for row in ppo_rows], ["PPO-001"])
+        self.assertEqual([row["ppo_no"] for row in fabric_rows], ["PPO-001"])
+        self.assertIn("ppo_mapping", bundle["source_live_error"])
+
     def test_topology_only_load_skips_slow_received_and_shipment_queries(self) -> None:
         connection = mock.MagicMock()
         connection.__enter__.return_value = connection

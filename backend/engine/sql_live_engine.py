@@ -6490,14 +6490,7 @@ def _save_go_source_cache_bundle(go: str, bundle: dict) -> bool:
     ppo_order_totals = dict(bundle.get("ppo_order_totals") or {})
     ppo_order_totals_refreshed = bool(bundle.get("ppo_order_totals_refreshed", True))
     ppo_detail_rows_by_ppo = dict(bundle.get("ppo_detail_rows_by_ppo") or {})
-    ppo_list = _source_cache_ppos(
-        ppo_mapping,
-        fabric_rows,
-        jo_ppo_yy_rows,
-        received_rows,
-        stock_balance_rows,
-        shipment_on_way_rows,
-    )
+    topology_error = ""
 
     with _snapshot_connect() as conn:
         feed_row = conn.execute(
@@ -6512,6 +6505,83 @@ def _save_go_source_cache_bundle(go: str, bundle: dict) -> bool:
         incoming_stamp = str(head.get("modify_date") or head.get("create_date") or "")
         if feed_stamp and (not incoming_stamp or incoming_stamp < feed_stamp):
             return False
+
+        # A live read can return the GO header while its PPO/fabric joins are
+        # temporarily empty. Treating that partial response as authoritative
+        # used to delete a valid staged topology and made the COI sheet appear
+        # and disappear between refreshes. Keep the coherent last-known-good
+        # structural rows, but mark the source incomplete so the worker retries.
+        topology_components = {
+            "colors": ("sql_go_colors", colors),
+            "lots": ("sql_go_lots", lots),
+            "jo_color_qty": ("sql_go_jo_color_qty", jo_color_qty_rows),
+            "ppo_mapping": ("sql_go_ppo_mapping", ppo_mapping),
+            "fabric": ("sql_go_fabric_rows", fabric_rows),
+            "bom": ("sql_go_bom_rows", sql_bom_rows),
+            "jo_ppo_yy": ("sql_go_jo_ppo_yy", jo_ppo_yy_rows),
+        }
+        missing_cached_components = [
+            component
+            for component, (table_name, incoming_rows) in topology_components.items()
+            if not incoming_rows
+            and conn.execute(
+                f"SELECT 1 FROM {table_name} WHERE go_no = ? LIMIT 1",
+                (go_key,),
+            ).fetchone()
+        ]
+        if missing_cached_components:
+            topology_error = (
+                "SOURCE_INCOMPLETE: live GO topology omitted cached components "
+                f"({', '.join(missing_cached_components)}); "
+                "retained last-known-good cache"
+            )
+
+            def _cached_rows(table_name: str) -> list[dict]:
+                rows = conn.execute(
+                    f"SELECT * FROM {table_name} WHERE go_no = ? ORDER BY row_index",
+                    (go_key,),
+                ).fetchall()
+                result: list[dict] = []
+                for row in rows:
+                    item = dict(row)
+                    for field in ("go_no", "row_index", "synced_at"):
+                        item.pop(field, None)
+                    result.append(item)
+                return result
+
+            colors = _cached_rows("sql_go_colors")
+            lots = _cached_rows("sql_go_lots")
+            jo_color_qty_rows = _cached_rows("sql_go_jo_color_qty")
+            ppo_mapping = _cached_rows("sql_go_ppo_mapping")
+            fabric_rows = _cached_rows("sql_go_fabric_rows")
+            sql_bom_rows = _cached_rows("sql_go_bom_rows")
+            jo_ppo_yy_rows = _cached_rows("sql_go_jo_ppo_yy")
+            volatile_sources_refreshed = False
+            ppo_order_totals_refreshed = False
+            bundle.update(
+                {
+                    "colors": colors,
+                    "lots": lots,
+                    "jo_color_qty_rows": jo_color_qty_rows,
+                    "ppo_mapping": ppo_mapping,
+                    "fabric_rows": fabric_rows,
+                    "sql_bom_rows": sql_bom_rows,
+                    "jo_ppo_yy_rows": jo_ppo_yy_rows,
+                    "volatile_sources_refreshed": False,
+                    "ppo_order_totals_refreshed": False,
+                    "source_mode": "sqlite-source-cache",
+                    "source_live_error": topology_error,
+                }
+            )
+
+        ppo_list = _source_cache_ppos(
+            ppo_mapping,
+            fabric_rows,
+            jo_ppo_yy_rows,
+            received_rows,
+            stock_balance_rows,
+            shipment_on_way_rows,
+        )
         head_cursor = conn.execute(
             """
             INSERT INTO sql_go_head (
@@ -6949,7 +7019,14 @@ def _save_go_source_cache_bundle(go: str, bundle: dict) -> bool:
             detail_params,
         )
 
-        _source_cache_meta(conn, f"GO:{go_key}", len(fabric_rows), synced_at)
+        _source_cache_meta(
+            conn,
+            f"GO:{go_key}",
+            len(fabric_rows),
+            synced_at,
+            topology_error,
+            content_changed=not bool(topology_error),
+        )
         if volatile_sources_refreshed and received_view:
             _source_cache_meta(conn, f"RECEIVED:{received_view}:{go_key}", len(received_rows), synced_at)
         if volatile_sources_refreshed and stock_balance_view:
