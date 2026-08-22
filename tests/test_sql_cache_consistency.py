@@ -32,7 +32,17 @@ class SqlCacheConsistencyTests(unittest.TestCase):
         live_sheet_store.LIVE_SHEET_STORE_DB = self.original_store_db
         with engine._snapshot_worker_lock:
             engine._snapshot_worker_state["last_full_go_feed_sync_at"] = self.original_full_sync_at
-        self.temp_dir.cleanup()
+        # API tests can leave a daemon preload iteration finishing against the
+        # temporary SQLite path. Windows rejects deletion until that short-lived
+        # handle closes, so retry cleanup instead of making the suite flaky.
+        for attempt in range(20):
+            try:
+                self.temp_dir.cleanup()
+                break
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                time.sleep(0.1)
 
     def _insert_feed_and_staged_head(
         self,

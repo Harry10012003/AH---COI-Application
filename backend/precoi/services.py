@@ -74,9 +74,17 @@ class GetYYService:
         self.mes_client = mes_client or MESSummaryClient()
         self.webmerge_client = webmerge_client or WebmergeClient()
         self.cm_client = cm_client or CMQaClient()
-        self.ppo_client = ppo_client or PpoDatabaseClient()
+        # Database credentials are only required by PPO enrichment actions.
+        # CM/workbook-only flows must remain usable without eagerly creating a
+        # SQL client that they never call.
+        self.ppo_client = ppo_client
         self.ppo_report_client = ppo_report_client or PPOReportClient()
         self._woven_ypd_version_cache: dict[str, str] = {}
+
+    def _get_ppo_client(self) -> PpoDatabaseClient:
+        if self.ppo_client is None:
+            self.ppo_client = PpoDatabaseClient()
+        return self.ppo_client
 
     def create_output(
         self,
@@ -1216,8 +1224,9 @@ class GetYYService:
         for ppo_no in ppo_numbers:
             logger(f"Querying Knit PPO NO {ppo_no}...")
             try:
-                part_rows = self.ppo_client.fetch_knit_part_aggregates(ppo_no)
-                color_rows = self.ppo_client.fetch_color_aggregates(ppo_no)
+                ppo_client = self._get_ppo_client()
+                part_rows = ppo_client.fetch_knit_part_aggregates(ppo_no)
+                color_rows = ppo_client.fetch_color_aggregates(ppo_no)
             except DatabaseQueryError:
                 raise
 
@@ -1366,7 +1375,7 @@ class GetYYService:
 
             logger(f"Querying Woven PPO NO {ppo_no}...")
             try:
-                aggregate_rows = self.ppo_client.fetch_woven_combo_aggregates(ppo_no)
+                aggregate_rows = self._get_ppo_client().fetch_woven_combo_aggregates(ppo_no)
             except DatabaseQueryError:
                 raise
 

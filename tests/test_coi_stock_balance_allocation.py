@@ -172,7 +172,7 @@ class CoiStockBalanceAllocationTests(unittest.TestCase):
             ),
         )
 
-    def test_pool_allocation_prioritizes_cutted_rows(self) -> None:
+    def test_pool_allocation_ignores_legacy_cutting_status(self) -> None:
         cutted = {
             "CUTTING STATUS": "CUTTED",
             "__issue_locked_qty": 0,
@@ -196,8 +196,8 @@ class CoiStockBalanceAllocationTests(unittest.TestCase):
 
         allocations = engine._compute_pool_system_allocations([pending, cutted], total_available=50)
 
-        self.assertEqual(allocations[id(cutted)], 50.0)
-        self.assertEqual(allocations[id(pending)], 0.0)
+        self.assertEqual(allocations[id(cutted)], 0.0)
+        self.assertEqual(allocations[id(pending)], 50.0)
 
 
 if __name__ == "__main__":
