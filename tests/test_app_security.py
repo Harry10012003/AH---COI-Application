@@ -38,6 +38,13 @@ class AppSecurityBoundaryTests(unittest.TestCase):
                 self.assertIn("text/html", response.content_type)
                 response.close()
 
+    def test_unknown_api_route_returns_json_404_not_spa_html(self) -> None:
+        response = self.client.get("/api/does-not-exist")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.get_json(), {"ok": False, "error": "Not found"})
+        self.assertIn("application/json", response.content_type)
+
     def test_frontend_does_not_generate_csp_blocked_inline_styles(self) -> None:
         frontend_index = Path(app_module.FRONTEND_DIR) / "index.html"
         if not frontend_index.exists():

@@ -78,8 +78,10 @@ from backend.scraper.mes_client import (
     query_mes_cutting,
 )
 from backend.sources import CACHE_DIR, FRONTEND_DIR, PROJECT_DIR, get_source_map
+from backend.precoi.routes import bp as precoi_bp
 
 app = Flask(__name__, static_folder=None)
+app.register_blueprint(precoi_bp)
 app.config["MAX_CONTENT_LENGTH"] = max(
     1,
     int(os.getenv("APP_MAX_UPLOAD_MB", "25") or "25"),
@@ -547,6 +549,8 @@ def frontend_asset(filename: str):
 
 @app.route("/favicon.svg")
 @app.route("/icons.svg")
+@app.route("/logotes.png")
+@app.route("/logotes.svg")
 def frontend_public_asset():
     return send_from_directory(str(FRONTEND_DIR / "dist"), request.path.lstrip("/"))
 
