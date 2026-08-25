@@ -13,85 +13,12 @@ import sqlite3
 import threading
 import time
 
-import pymssql
 from dbutils.pooled_db import PooledDB
 
 from backend.engine.sql_sources.read_only import assert_read_only_sql
 from backend.engine.sql_sources.metrics import query_metrics, timed_execute
+from backend.engine.sql_sources.pool import ConnectionWrapper as _ConnectionWrapper, CursorWrapper as _CursorWrapper, create_pool
 from backend.engine.refresh_scheduler import InteractiveGoQueue
-
-
-class _CursorWrapper:
-    def __init__(self, cursor, source_key: str = "main"):
-        self._cursor = cursor
-        self._source_key = source_key
-
-    def execute(self, operation, params=None):
-        assert_read_only_sql(operation)
-        if isinstance(operation, str) and "?" in operation:
-            operation = operation.replace("?", "%s")
-        return timed_execute(
-            self._source_key,
-            lambda: self._cursor.execute(operation, params),
-        )
-
-    def fetchone(self):
-        return self._cursor.fetchone()
-
-    def fetchall(self):
-        return self._cursor.fetchall()
-
-    def fetchmany(self, size=None):
-        return self._cursor.fetchmany(size)
-
-    def __getattr__(self, name):
-        return getattr(self._cursor, name)
-
-    @property
-    def description(self):
-        return self._cursor.description
-
-    @property
-    def rowcount(self):
-        return self._cursor.rowcount
-
-    def close(self):
-        self._cursor.close()
-
-
-class _ConnectionWrapper:
-    def __init__(self, conn, source_key: str = "main"):
-        self._conn = conn
-        self._source_key = source_key
-
-    def cursor(self):
-        return _CursorWrapper(self._conn.cursor(), self._source_key)
-
-    def commit(self):
-        return self._conn.commit()
-
-    def rollback(self):
-        return self._conn.rollback()
-
-    def close(self):
-        return self._conn.close()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        self.close()
-
-    @property
-    def timeout(self):
-        return getattr(self._conn, "timeout", 0)
-
-    @timeout.setter
-    def timeout(self, value):
-        self._conn.timeout = value
-
-    def __getattr__(self, name):
-        return getattr(self._conn, name)
 
 _pool_main = None
 _pool_shipment: dict[str, PooledDB] = {}
@@ -105,54 +32,30 @@ _CUSTOMER_NAME_CACHE_LOCK = threading.Lock()
 def _get_main_pool():
     global _pool_main
     if _pool_main is None:
-        host = SQL_SERVER_HOST
-        port = 1433
-        if ":" in host:
-            host, port_str = host.rsplit(":", 1)
-            try:
-                port = int(port_str)
-            except ValueError:
-                pass
-        _pool_main = PooledDB(
-            creator=pymssql,
-            maxconnections=20,
-            mincached=2,
-            maxcached=10,
-            blocking=True,
-            server=host,
-            port=port,
+        _pool_main = create_pool(
+            server=SQL_SERVER_HOST,
             user=SQL_SERVER_USER,
             password=SQL_SERVER_PASSWORD,
             database=SQL_SERVER_DATABASE,
+            maxconnections=20,
+            mincached=2,
+            maxcached=10,
             timeout=max(SQL_SERVER_TIMEOUT_SEC, SQL_SERVER_QUERY_TIMEOUT_SEC),
-            tds_version="7.0",
         )
     return _pool_main
 
 
 def _get_shipment_pool(database: str):
     if database not in _pool_shipment:
-        host = SHIPMENT_SQL_SERVER_HOST
-        port = 1433
-        if ":" in host:
-            host, port_str = host.rsplit(":", 1)
-            try:
-                port = int(port_str)
-            except ValueError:
-                pass
-        _pool_shipment[database] = PooledDB(
-            creator=pymssql,
-            maxconnections=10,
-            mincached=1,
-            maxcached=5,
-            blocking=True,
-            server=host,
-            port=port,
+        _pool_shipment[database] = create_pool(
+            server=SHIPMENT_SQL_SERVER_HOST,
             user=SHIPMENT_SQL_SERVER_USER,
             password=SHIPMENT_SQL_SERVER_PASSWORD,
             database=database,
+            maxconnections=10,
+            mincached=1,
+            maxcached=5,
             timeout=SHIPMENT_SQL_SERVER_TIMEOUT_SEC,
-            tds_version="7.0",
         )
     return _pool_shipment[database]
 
@@ -160,27 +63,15 @@ def _get_shipment_pool(database: str):
 def _get_stock_pool():
     global _pool_stock
     if _pool_stock is None:
-        host = STOCK_SQL_SERVER
-        port = 1433
-        if ":" in host:
-            host, port_str = host.rsplit(":", 1)
-            try:
-                port = int(port_str)
-            except ValueError:
-                pass
-        _pool_stock = PooledDB(
-            creator=pymssql,
-            maxconnections=10,
-            mincached=1,
-            maxcached=5,
-            blocking=True,
-            server=host,
-            port=port,
+        _pool_stock = create_pool(
+            server=STOCK_SQL_SERVER,
             user=STOCK_SQL_USER,
             password=STOCK_SQL_PASSWORD,
             database=STOCK_SQL_DATABASE,
+            maxconnections=10,
+            mincached=1,
+            maxcached=5,
             timeout=max(STOCK_SQL_TIMEOUT_SEC, STOCK_SQL_QUERY_TIMEOUT_SEC),
-            tds_version="7.0",
         )
     return _pool_stock
 
@@ -1692,18 +1583,15 @@ def _load_go_customer_name_from_sales(go: str) -> str:
                 return ""
         global _pool_sc_master
         if _pool_sc_master is None:
-            _pool_sc_master = PooledDB(
-                creator=pymssql,
-                maxconnections=5,
-                mincached=1,
-                maxcached=3,
-                blocking=True,
+            _pool_sc_master = create_pool(
                 server=SHIPMENT_SQL_SERVER_HOST,
                 user=SHIPMENT_SQL_SERVER_USER,
                 password=SHIPMENT_SQL_SERVER_PASSWORD,
                 database="EsquelRptDB",
+                maxconnections=5,
+                mincached=1,
+                maxcached=3,
                 timeout=10,
-                tds_version="7.0",
             )
         conn2 = _ConnectionWrapper(_pool_sc_master.connection(), "sc-master")
         try:
@@ -2415,6 +2303,13 @@ def _initialize_snapshot_tables() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sql_ppo_detail_ppo ON sql_ppo_detail_rows(ppo_no)")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sheet_snapshots_version ON sheet_snapshots(payload_version, updated_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_go_feed_schedule ON go_feed(cache_state, modify_date)"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_go_issue_locks_go ON go_issue_locks(go_no)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sql_source_sync_key ON sql_source_sync(source_key, synced_at)"
         )
         _migrate_local_edit_cache_to_sqlite(conn)
         conn.execute(

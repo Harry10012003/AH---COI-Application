@@ -45,10 +45,9 @@ deletes files from the project workspace.
 4. Create the `ESQ_LEFTOVER_SQL` Windows Credential Manager entry using
    `scripts\Install-SqlCredential.ps1`; obtain the password through the normal
    credential owner, not by putting it in an environment file.
-5. Configure the server-specific OneDrive destination and other optional
-   variables through the service/process environment as needed. Use
-   `.env.example` only as a reference.
+5. Have the database owner run `migrations/postgresql/001_create_coi_issue_store.sql`,
+   then configure the `COI_PG_*` service secrets using `.env.example` as the reference.
 6. Start with `start_TEST_with_status.bat` or run
    `py -m backend.server --host 0.0.0.0 --port 5070 --threads 24`.
-7. Verify `/api/status`, `/api/sql/status` and
+7. Verify `/api/status`, `/api/sql/status`, `/api/postgres/status` and
    `/api/cutting/coi/latest?limit=5000` from the company network.

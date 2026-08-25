@@ -57,6 +57,13 @@ export function refreshPpo(go) {
   return request(`/api/sql/go/${encodeURIComponent(go)}/refresh-ppo`, { method: 'POST' })
 }
 
+export function applyPpoRefresh(go, previewId) {
+  return request(`/api/sql/go/${encodeURIComponent(go)}/refresh-ppo/apply`, {
+    method: 'POST',
+    body: JSON.stringify({ preview_id: previewId }),
+  })
+}
+
 export function issueCoi(go) {
   return request(`/api/sql/go/${encodeURIComponent(go)}/issue`, {
     method: 'POST',

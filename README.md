@@ -18,7 +18,7 @@ The project uses a Flask + Waitress backend and a React + Vite frontend. It is d
 - Added **Update YY Req No**, **Update PPO Qty**, **Update CM**, **Download Excel**, and the current user guide in a modal.
 - Restricted Pre-COI APIs and route access to the `AH` account.
 - Added the Tessellation mark as the application logo and browser favicon.
-- Restored the COI Process allocation rule that prioritizes rows with `CUTTING STATUS = CUTTED`; added a regression test for it.
+- Stores the current issued COI in PostgreSQL with revision and field-level audit history.
 
 ## Architecture
 
@@ -32,11 +32,12 @@ Browser (React + Vite)
 Flask API + Waitress
   ├─ Authentication and route authorization
   ├─ COI SQL/live-sheet engine and SQLite snapshot workers
+  ├─ PostgreSQL current ISSUE store and audit trail
   ├─ Pre-COI job store and workbook export service
   └─ GO / PPO / GW / MES / YPD source clients
              │
              ▼
-SQL Server, ESCM/YPD, GW, MES, local SQLite cache
+SQL Server, PostgreSQL, ESCM/YPD, GW, MES, local SQLite source cache
 ```
 
 Important folders:
@@ -47,7 +48,7 @@ backend/
   app.py                    Flask routes, auth, COI endpoints
   sources.py                Source URLs, paths, credential configuration
   config/credentials.py     Environment / Windows Credential Manager resolver
-  engine/                   COI engine, allocation, snapshots, export, issue archive
+  engine/                   COI engine, allocation, snapshots, export, PostgreSQL ISSUE store
   precoi/                   Web Pre-COI jobs, parsers, Excel export, routes
   scraper/                  GO, PPO, GW, MES and sample-status clients
 frontend/
@@ -70,11 +71,12 @@ data/cache/                 Runtime SQLite/jobs/cache only; never commit
 - Node.js/npm for the frontend build.
 - Network access to the approved SQL, ESCM/YPD, GW and MES sources.
 - SQL credentials configured by environment variables or Windows Credential Manager.
+- PostgreSQL access and the migration in `migrations/postgresql/` applied by the database owner.
 
 ### Install and run
 
 ```powershell
-cd "D:\COI Merge V2\COI Total"
+cd "D:\3. PROJECTs\23. COI Application"
 py -3 -m venv venv
 .\venv\Scripts\Activate.ps1
 py -m pip install -r requirements.txt
@@ -84,7 +86,7 @@ npm ci
 npm run build
 cd ..
 
-py -m backend.server --host 127.0.0.1 --port 5070
+py -m backend.server --host 127.0.0.1 --port 5070 --threads 24
 ```
 
 Open `http://127.0.0.1:5070`.
@@ -96,7 +98,7 @@ Do not run `backend/app.py` directly. `backend.server` loads `.env`, validates t
 Run the backend as above, then in a second terminal:
 
 ```powershell
-cd "D:\COI Merge V2\COI Total\frontend"
+cd "D:\3. PROJECTs\23. COI Application\frontend"
 npm run dev
 ```
 
@@ -116,7 +118,7 @@ Open `http://localhost:5173`. Vite proxies `/api` to Flask.
 1. From Home, choose **COI Process**.
 2. Search/select a GO from the GO selector.
 3. Open the COI workspace to inspect source data, stock/allocation and editable COI fields.
-4. Refresh or save permitted edits, then export/issue according to the established COI workflow.
+4. Refresh or save permitted edits, then export on demand or ISSUE to PostgreSQL.
 5. Use Home or Change to return to GO selection.
 
 ### Data behavior
@@ -124,8 +126,15 @@ Open `http://localhost:5173`. Vite proxies `/api` to Flask.
 - The live-sheet engine stages SQL source data into SQLite snapshots so the UI can return cached sheets while the background worker refreshes sources.
 - `Rcv Data Status = NOT_FOUND` means the receipt record is not available; it must not be interpreted as received quantity `0`.
 - Stock allocation is verified from the dedicated stock source. If the source is unavailable, the application reports it instead of silently allocating against receipt data.
-- Allocation order prioritizes `CUTTING STATUS = CUTTED`, then due date, required quantity/lot/JO ordering. This keeps physically cut work ahead of later rows when stock is constrained.
 - A source-cache warning is distinct from an application crash. If source data is stale, wait for the SQLite preload worker or retry after the relevant source is healthy.
+
+### PostgreSQL ISSUE setup and behavior
+
+1. Ask the database owner to run `migrations/postgresql/001_create_coi_issue_store.sql` against `TGVLocalApp`.
+2. Configure the non-secret `COI_PG_*` values from `.env.example`; keep `COI_PG_PASSWORD` only in the local `.env` or service secret store.
+3. Start the backend and verify `GET /api/postgres/status` returns `migration_ready: true`.
+
+The first ISSUE creates PostgreSQL revision 1. Opening that GO later reads the PostgreSQL current rows before the live cache. Saving PPO, AH Allocate, or User Remark updates the current rows and audit log without increasing the ISSUE revision. Refresh PPO shows a diff preview and mutates PostgreSQL only after AH confirms Apply. Export Excel remains an on-demand download and is not part of ISSUE.
 
 ## Pre-COI
 

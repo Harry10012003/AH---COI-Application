@@ -67,6 +67,7 @@ class AuthenticationTests(unittest.TestCase):
 
         with (
             mock.patch.object(app_module, "start_background_services"),
+            mock.patch.object(app_module, "load_current_issue", return_value=None),
             mock.patch.object(
                 app_module,
                 "build_live_coi_sheet",
@@ -89,6 +90,7 @@ class AuthenticationTests(unittest.TestCase):
         protected_requests = (
             ("post", "/api/sql/go/S26V00001/sheet/edits"),
             ("post", "/api/sql/go/S26V00001/refresh-ppo"),
+            ("post", "/api/sql/go/S26V00001/refresh-ppo/apply"),
             ("post", "/api/sql/go/S26V00001/sheet/export"),
             ("post", "/api/sql/go/S26V00001/issue"),
         )
@@ -102,6 +104,7 @@ class AuthenticationTests(unittest.TestCase):
         _payload, headers = self._login("AH")
         with (
             mock.patch.object(app_module, "start_background_services"),
+            mock.patch.object(app_module, "load_current_issue", return_value=None),
             mock.patch.object(app_module, "save_live_sheet_edits", return_value={"ok": True}) as save_edits,
         ):
             response = self.client.post(

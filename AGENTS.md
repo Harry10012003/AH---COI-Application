@@ -52,7 +52,8 @@ py -m unittest discover tests
 - `backend/config/credentials.py` — credential resolution
 - `backend/engine/` — COI, SQLite cache, issue archive, workbook logic
 - `backend/scraper/` — GO, PPO, GW, MES source clients
-- SQLite caches: `live_sheet_snapshot_v56.db`, `live_sheet_store_v56.db`, `issued_coi_archive_v1.db`
+- SQLite source caches: `live_sheet_snapshot_v56.db`, `live_sheet_store_v56.db`
+- Current issued COI data: PostgreSQL `ah_app.current_issue*`
 - Background workers start once via `start_background_services()`
 - `Rcv Data Status=NOT_FOUND` ≠ received qty = 0
 

@@ -27,7 +27,10 @@ class AppSecurityBoundaryTests(unittest.TestCase):
         self.assertIn("default-src 'self'", csp)
         self.assertIn("script-src 'self'", csp)
         self.assertIn("style-src 'self'", csp)
-        self.assertNotIn("'unsafe-inline'", csp)
+        self.assertIn("'unsafe-inline'", csp)
+        self.assertIn("base-uri 'self'", csp)
+        self.assertIn("frame-ancestors 'self'", csp)
+        self.assertIn("object-src 'none'", csp)
         response.close()
 
     def test_spa_deep_links_serve_frontend(self) -> None:
@@ -376,7 +379,7 @@ class AppSecurityBoundaryTests(unittest.TestCase):
         }
         with (
             mock.patch.object(app_module, "_CUTTING_COI_API_ALLOWED_ORIGINS", {"*"}),
-            mock.patch.object(app_module, "get_latest_issued_coi_feed", return_value=feed) as get_feed,
+            mock.patch.object(app_module, "get_latest_current_feed", return_value=feed) as get_feed,
             mock.patch.object(app_module, "start_background_services") as start,
         ):
             response = self.client.get(

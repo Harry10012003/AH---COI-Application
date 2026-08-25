@@ -22,10 +22,17 @@ py -3 -c "from backend.sources import get_source_map; print(get_source_map()['sq
 ```
 
 `TEST_SHIPMENT_SQL` and `TEST_GW_LOGIN` are separate optional credential
-targets. Do not reuse the main SQL password for them. `.env.example` is a
-reference only: this application intentionally does not load `.env` files at
-runtime. Configure non-secret values in the Windows service/process
-environment and keep passwords in Credential Manager.
+targets. Do not reuse the main SQL password for them. `backend.server` loads a
+local `.env` when present. Keep production passwords in the Windows service
+secret environment or Credential Manager and never commit `.env`.
+
+## PostgreSQL ISSUE store
+
+Install dependencies from `requirements.txt`, then have the database owner run
+`migrations/postgresql/001_create_coi_issue_store.sql` against `TGVLocalApp`.
+Configure `COI_PG_HOST`, `COI_PG_PORT`, `COI_PG_DATABASE`, `COI_PG_SCHEMA`,
+`COI_PG_USER`, `COI_PG_PASSWORD` and `COI_PG_SSLMODE`. The application validates
+the schema but never creates or alters it at startup.
 
 Install Microsoft ODBC Driver 18, then use the TLS values in `.env.example`.
 The legacy Windows `SQL Server` driver cannot validate the current RDS
@@ -61,9 +68,9 @@ service starts immediately from SQLite while SQL warm-up continues in the
 background.
 
 The service account needs write access to `data/cache` (or to the directory
-configured through `TEST_CACHE_DIR`) and to `ONEDRIVE_COI_FOLDER_PATH` when
-users issue COI workbooks. A clean IT ZIP intentionally starts with an empty
-cache; source rows are reloaded from internal SQL after startup.
+configured through `TEST_CACHE_DIR`) and INSERT/UPDATE/DELETE/SELECT access to
+the `ah_app` ISSUE tables. A clean IT ZIP intentionally starts with an empty
+source cache; source rows are reloaded from internal SQL after startup.
 
 For a persistent server installation, configure this command as a Windows
 service or Scheduled Task with the project folder as its working directory:
@@ -81,6 +88,7 @@ deployment requires an authenticated reverse proxy or gateway managed by IT.
 ```text
 GET /api/status
 GET /api/sql/status
+GET /api/postgres/status
 GET /api/sql/preload/status
 GET /api/sql/source-cache/status
 GET /api/cutting/coi/latest?limit=5000
@@ -89,17 +97,17 @@ GET /api/cutting/coi/latest?limit=5000
 The first four routes reveal only safe aggregate status unless
 `APP_DIAGNOSTICS_DETAIL=true` is explicitly set on a trusted local machine.
 
-## PPO edit synchronization
+## Issued COI synchronization
 
 Editing a `PPO` cell now performs this sequence synchronously:
 
-1. Save the operator override in SQLite.
+1. Resolve the issued row from PostgreSQL and save the operator override.
 2. Query SQL Server with a targeted lookup for the resulting PPO/fabric quantities.
-3. Return the recalculated sheet to the UI.
-4. If that GO was already issued, replace the current rows in the SQLite
-   Cutting feed, update the issued workbook in the OneDrive COI folder, and
-   rebuild `COI-CUTTING-COMBINED.xlsx`.
+3. Replace the current PostgreSQL rows in one transaction and write exact old/new audit values.
+4. Return the recalculated PostgreSQL sheet to the UI.
 
-The original issue batch and `ISSUE AT` stay unchanged. `LAST SYNC AT` and the
-feed `data_version` identify the later correction. A GO that has not yet been
-issued is never auto-issued merely because an operator edits it.
+The ISSUE revision stays unchanged for Save edits; `sync_revision` and
+`last_synced_at` identify later corrections. AH Allocate and User Remark use
+the same auto-sync behavior. A GO that has not yet been issued is never
+auto-issued merely because an operator edits it. Refresh PPO requires a preview
+and explicit Apply before PostgreSQL changes.

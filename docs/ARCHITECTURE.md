@@ -6,7 +6,7 @@ backend/
   server.py              Waitress production entry point
   sources.py             source endpoints and non-secret configuration
   config/credentials.py  environment / Windows Credential Manager resolver
-  engine/                COI, SQLite cache, issue archive and workbook logic
+  engine/                COI, SQLite source cache, PostgreSQL ISSUE and export logic
   scraper/               GO, PPO, GW and MES source clients
 frontend/
   index.html             UI shell
@@ -29,9 +29,10 @@ deployment and are excluded from the clean IT package.
 The runtime data flow is:
 
 ```text
-UI -> Flask/Waitress -> SQL source cache + live SQL query -> live sheet SQLite
-                                                |
-ISSUE COI -> issued workbook + issue archive SQLite -> Cutting JSON endpoint
+Unissued GO -> Flask/Waitress -> SQL source cache + live SQL -> live sheet SQLite
+Issued GO   -> Flask/Waitress -> PostgreSQL ah_app.current_issue + current_issue_row
+ISSUE/Save  -> PostgreSQL transaction -> current rows + issue_audit_log
+Export      -> on-demand browser download only
 ```
 
 Only one process may own the SQL preload worker lock. Start the service through
