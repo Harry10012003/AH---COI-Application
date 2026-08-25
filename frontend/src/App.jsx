@@ -31,6 +31,7 @@ function AppLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, canEdit, logout } = useAuth()
+  const isPreCoiUser = user?.username?.trim().toLowerCase() === 'ah'
   const params = new URLSearchParams(location.search)
   const currentGo = params.get('go') || ''
   const isActive = (path) => location.pathname === path ? 'active' : ''
@@ -44,11 +45,15 @@ function AppLayout() {
     <div className="app-layout">
       <header className="header">
         <div className="header-left">
-          <img src="/logotes.svg" alt="" className="header-logo" />
-          <span className="app-name">COI</span>
+          <img
+            src="/Tessellation-Logo-EN-RGB_transparent.png"
+            alt="Tessellation"
+            className="header-logo"
+          />
         </div>
-        <nav className="header-nav">
+        <nav className="header-nav" aria-label="Primary navigation">
           <Link to="/" className={isActive('/')}>Home</Link>
+          {isPreCoiUser && <Link to="/pre-coi" className={isActive('/pre-coi')}>Pre-COI</Link>}
           <Link to="/coi-process" className={isActive('/coi-process')}>COI Process</Link>
           {currentGo && <Link to={`/coi?go=${currentGo}`} className={isActive('/coi')}>COI Workspace</Link>}
         </nav>
@@ -61,7 +66,7 @@ function AppLayout() {
           <button className="btn btn-sm logout-btn" onClick={handleLogout}>Logout</button>
         </div>
       </header>
-      <main className="main-content">
+      <main className={`main-content ${location.pathname === '/' ? 'home-surface' : ''}`}>
         <Routes>
           <Route path="/" element={<COIHome />} />
           <Route path="/pre-coi" element={<PreCoiRoute><PreCoiWorkspace /></PreCoiRoute>} />

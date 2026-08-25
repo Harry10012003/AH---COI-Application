@@ -25,17 +25,19 @@ from backend.auth import (
 
 from backend.engine.coi_engine import build_coi_preview
 from backend.engine.coi_export_engine import build_coi_ui_export_workbook
-from backend.engine.coi_issue_archive import (
-    backfill_local_issued_coi,
-    get_latest_issued_coi_feed,
-    issued_coi_archive_status,
-    rebuild_combined_issued_coi,
-)
 from backend.engine.coi_issue_engine import (
-    get_issue_job_status,
-    issue_coi_to_sharepoint,
-    queue_issue_coi_to_sharepoint,
-    sync_published_issue_after_sheet_change,
+    apply_refresh_preview,
+    create_refresh_preview,
+    issue_coi_to_postgres,
+    sync_issued_sheet_after_edit,
+)
+from backend.engine.coi_postgres import (
+    CoiPostgresError,
+    apply_current_edits,
+    get_latest_current_feed,
+    load_current_issue,
+    normalize_sheet_rows,
+    postgres_status,
 )
 from backend.engine.color_audit_engine import color_audit_status, ensure_color_audit_worker
 from backend.engine.excel_workspace import (
@@ -594,6 +596,12 @@ def api_sql_status():
     return jsonify(result), (200 if result.get("ok") else 502)
 
 
+@app.route("/api/postgres/status")
+def api_postgres_status():
+    result = postgres_status()
+    return jsonify(result), (200 if result.get("ok") else 503)
+
+
 @app.route("/api/sql/preload/status")
 def api_sql_preload_status():
     return jsonify({"ok": True, **_public_snapshot_status()})
@@ -645,6 +653,13 @@ def api_sql_go_coi(go: str):
 
 @app.route("/api/sql/go/<go>/sheet")
 def api_sql_go_sheet(go: str):
+    go_key = str(go or "").strip().upper()
+    try:
+        current_issue = load_current_issue(go_key)
+    except CoiPostgresError as exc:
+        return jsonify({"ok": False, "error": str(exc), "storage_source": "postgres"}), 503
+    if current_issue is not None:
+        return jsonify(current_issue)
     viewer_mode = str((getattr(g, "auth_user", {}) or {}).get("role") or "") == ROLE_VIEWER
     source_max_age_raw = str(request.args.get("source_max_age_sec", "") or "").strip()
     source_max_age_sec = None
@@ -676,8 +691,9 @@ def api_sql_go_sheet(go: str):
 
 @app.route("/api/sql/go/<go>/refresh-ppo", methods=["POST"])
 def api_sql_go_refresh_ppo(go: str):
+    go_key = str(go or "").strip().upper()
     result = build_live_coi_sheet(
-        str(go or "").strip().upper(),
+        go_key,
         prefer_mes_cache=True,
         allow_live_mes=False,
         use_snapshot=False,
@@ -688,7 +704,27 @@ def api_sql_go_refresh_ppo(go: str):
         require_current_source=True,
         snapshot_built_from="manual-ppo-refresh",
     )
-    return jsonify(result), (200 if result.get("ok") else 502)
+    if not result.get("ok"):
+        return jsonify(result), 502
+    preview = create_refresh_preview(
+        go_key,
+        result,
+        actor=str((getattr(g, "auth_user", {}) or {}).get("username") or ""),
+    )
+    return jsonify(preview), (200 if preview.get("ok") else 502)
+
+
+@app.route("/api/sql/go/<go>/refresh-ppo/apply", methods=["POST"])
+def api_sql_go_refresh_ppo_apply(go: str):
+    payload = _json_payload()
+    result = apply_refresh_preview(
+        go,
+        payload.get("preview_id"),
+        actor=str((getattr(g, "auth_user", {}) or {}).get("username") or ""),
+    )
+    if result.get("ok"):
+        return jsonify(result)
+    return jsonify(result), (409 if result.get("conflict") else 502)
 
 
 @app.route("/api/sql/go/<go>/sheet/export", methods=["POST"])
@@ -699,15 +735,20 @@ def api_sql_go_sheet_export(go: str):
         return jsonify({"ok": False, "error": "GO number required"}), 400
     payload["go"] = go_key
     if not isinstance(payload.get("columns"), list) or not payload.get("columns"):
-        result = build_live_coi_sheet(
-            go_key,
-            use_snapshot=True,
-            persist_snapshot=True,
-            allow_inline_build=True,
-            allow_slow_sql_enrichment=True,
-            sample_type=str(payload.get("sample_type") or "PPS").strip(),
-            require_current_source=True,
-        )
+        try:
+            result = load_current_issue(go_key)
+        except CoiPostgresError as exc:
+            return jsonify({"ok": False, "error": str(exc), "storage_source": "postgres"}), 503
+        if result is None:
+            result = build_live_coi_sheet(
+                go_key,
+                use_snapshot=True,
+                persist_snapshot=True,
+                allow_inline_build=True,
+                allow_slow_sql_enrichment=True,
+                sample_type=str(payload.get("sample_type") or "PPS").strip(),
+                require_current_source=True,
+            )
         if not result.get("ok"):
             return jsonify(result), 502
         payload = result
@@ -725,18 +766,84 @@ def api_sql_go_sheet_export(go: str):
 def api_sql_go_sheet_edits(go: str):
     payload = _json_payload()
     edits = payload.get("edits") if isinstance(payload.get("edits"), list) else []
-    result = save_live_sheet_edits(
-        go,
-        edits,
-        manual_allocation_mode=str(payload.get("manual_allocation_mode", "") or "").strip() or None,
-    )
+    go_key = str(go or "").strip().upper()
+    actor = str((getattr(g, "auth_user", {}) or {}).get("username") or "")
+    try:
+        current_issue = load_current_issue(go_key)
+    except CoiPostgresError as exc:
+        return jsonify({"ok": False, "error": str(exc), "storage_source": "postgres"}), 503
+
     ppo_changed = any(
         isinstance(edit, dict) and str(edit.get("field") or "").strip() == "PPO"
         for edit in edits
     )
+    if current_issue is not None and not ppo_changed:
+        try:
+            result = apply_current_edits(go_key, edits, actor=actor)
+            result["sheet"] = load_current_issue(go_key)
+            return jsonify(result)
+        except CoiPostgresError as exc:
+            return jsonify({"ok": False, "error": str(exc), "storage_source": "postgres"}), 502
+
+    original_edits: list[dict] = []
+    if current_issue is not None:
+        # PostgreSQL exposes UUID row identities. Resolve those UUIDs back to
+        # live-row storage keys only for PPO recalculation; PostgreSQL remains
+        # the authoritative persisted record.
+        live_base = build_live_coi_sheet(
+            go_key,
+            prefer_mes_cache=True,
+            allow_live_mes=False,
+            use_snapshot=True,
+            persist_snapshot=False,
+            allow_inline_build=True,
+            allow_slow_sql_enrichment=False,
+            require_current_source=False,
+        )
+        try:
+            normalized_live = normalize_sheet_rows({**live_base, "go": go_key})
+        except CoiPostgresError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409
+        live_rows = [row for row in live_base.get("rows") or [] if isinstance(row, dict)]
+        live_by_id = {
+            str(normalized["internal_row_id"]): row
+            for row, normalized in zip(live_rows, normalized_live, strict=False)
+        }
+        current_by_id = {
+            str(row.get("_row_key") or ""): row
+            for row in current_issue.get("rows") or []
+            if isinstance(row, dict)
+        }
+        mapped_edits = []
+        for edit in edits:
+            row_id = str(edit.get("row_key") or "").strip()
+            live_row = live_by_id.get(row_id)
+            previous = current_by_id.get(row_id)
+            if live_row is None or previous is None:
+                return jsonify({"ok": False, "error": "The edited row cannot be matched to the live COI source"}), 409
+            mapped_edits.append({**edit, "row_key": live_row.get("_row_key"), "storage": live_row.get("_storage") or {}})
+            original_edits.append(
+                {
+                    "row_key": live_row.get("_row_key"),
+                    "storage": live_row.get("_storage") or {},
+                    "field": edit.get("field"),
+                    "value": previous.get(str(edit.get("field") or "")),
+                }
+            )
+        edits = mapped_edits
+
+    result = save_live_sheet_edits(
+        go_key,
+        edits,
+        manual_allocation_mode=str(payload.get("manual_allocation_mode", "") or "").strip() or None,
+    )
     refresh_after_ppo_edit = payload.get("refresh_after_ppo_edit", True)
     if isinstance(refresh_after_ppo_edit, str):
         refresh_after_ppo_edit = refresh_after_ppo_edit.strip().lower() not in {"0", "false", "no", "off"}
+    if current_issue is not None:
+        # An issued GO is PostgreSQL-authoritative; callers cannot opt out of
+        # persisting a PPO edit after the live recalculation succeeds.
+        refresh_after_ppo_edit = True
     if not result.get("ok") or not ppo_changed or not refresh_after_ppo_edit:
         return jsonify(result), (200 if result.get("ok") else 400)
 
@@ -744,7 +851,6 @@ def api_sql_go_sheet_edits(go: str):
     # topology, then query SQL Server for the overridden PPO only. Querying the
     # full historical GO bundle again can take a minute on the received/FOC
     # view and is unnecessary for this operator action.
-    go_key = str(go or "").strip().upper()
     refreshed_sheet = build_live_coi_sheet(
         go_key,
         prefer_mes_cache=True,
@@ -758,16 +864,23 @@ def api_sql_go_sheet_edits(go: str):
         snapshot_built_from="ppo-edit-live-sql",
     )
     if not refreshed_sheet.get("ok"):
+        if original_edits:
+            save_live_sheet_edits(go_key, original_edits)
         result["refresh_error"] = refreshed_sheet.get("error") or refreshed_sheet.get("detail") or "SQL refresh failed"
         result["sheet"] = refreshed_sheet
-        return jsonify(result), 200
+        return jsonify(result), (502 if current_issue is not None else 200)
 
     result["sheet"] = refreshed_sheet
     result["recalculated_from_sql"] = True
-    issue_sync = sync_published_issue_after_sheet_change(go_key, refreshed_sheet)
+    issue_sync = sync_issued_sheet_after_edit(go_key, refreshed_sheet, actor=actor)
     result["issued_coi_sync"] = issue_sync
     if not issue_sync.get("ok"):
+        if original_edits:
+            save_live_sheet_edits(go_key, original_edits)
         result["issued_coi_sync_error"] = issue_sync.get("error") or "Issued COI synchronization failed"
+        return jsonify(result), 502
+    if current_issue is not None:
+        result["sheet"] = load_current_issue(go_key)
     return jsonify(result), 200
 
 
@@ -780,70 +893,28 @@ def api_sql_go_sheet_query_remark(go: str):
 def api_sql_go_issue(go: str):
     payload = _json_payload()
     go_key = str(payload.get("go") or go or "").strip().upper()
-    async_raw = payload.get("async", True)
-    async_mode = bool(async_raw) if isinstance(async_raw, bool) else str(async_raw or "true").strip().lower() != "false"
-    if async_mode:
-        result = queue_issue_coi_to_sharepoint(go_key, target_url=payload.get("target_url"))
-        return jsonify(result), 202
-    result = issue_coi_to_sharepoint(go_key, target_url=payload.get("target_url"))
-    return jsonify(result), (200 if result.get("ok") else 502)
-
-
-@app.route("/api/sql/go/<go>/issue/status")
-def api_sql_go_issue_status(go: str):
-    go_key = str(go or "").strip().upper()
-    result = get_issue_job_status(go_key)
-    return jsonify({"ok": True, **result})
-
-
-@app.route("/api/sql/issued-coi/combined/status")
-def api_issued_coi_combined_status():
-    return jsonify(issued_coi_archive_status())
-
-
-@app.route("/api/sql/issued-coi/combined/rebuild", methods=["POST"])
-def api_issued_coi_combined_rebuild():
-    payload = _json_payload()
-    backfill_raw = payload.get("backfill", True)
-    backfill_enabled = bool(backfill_raw) if isinstance(backfill_raw, bool) else str(backfill_raw or "true").strip().lower() != "false"
-    backfill_result = backfill_local_issued_coi() if backfill_enabled else {"ok": True, "skipped": True}
-    result = rebuild_combined_issued_coi(sync_to_onedrive=True)
-    result["backfill"] = backfill_result
-    return jsonify(result), (200 if result.get("ok") else 502)
-
-
-@app.route("/api/sql/issued-coi/combined/download")
-def api_issued_coi_combined_download():
-    status = issued_coi_archive_status()
-    file_path = Path(str(status.get("local_file_path") or ""))
-    if not file_path.exists():
-        rebuilt = rebuild_combined_issued_coi(sync_to_onedrive=True)
-        if not rebuilt.get("ok"):
-            return jsonify(rebuilt), 404
-        file_path = Path(str(rebuilt.get("file_path") or ""))
-    if not file_path.exists():
-        return jsonify({"ok": False, "error": "Combined ISSUE COI workbook was not created"}), 404
-    return send_file(
-        file_path,
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        as_attachment=True,
-        download_name=file_path.name,
-        max_age=0,
+    result = issue_coi_to_postgres(
+        go_key,
+        actor=str((getattr(g, "auth_user", {}) or {}).get("username") or ""),
     )
+    return jsonify(result), (200 if result.get("ok") else 502)
 
 
 @app.route("/api/cutting/coi/latest", methods=["GET", "OPTIONS"])
 def api_cutting_coi_latest():
     if request.method == "OPTIONS":
         return ("", 204)
-    result = get_latest_issued_coi_feed(
-        go=request.args.get("go"),
-        ppo=request.args.get("ppo"),
-        jo=request.args.get("jo"),
-        color_code=request.args.get("color_code"),
-        limit=request.args.get("limit", 5000),
-        offset=request.args.get("offset", 0),
-    )
+    try:
+        result = get_latest_current_feed(
+            go=request.args.get("go"),
+            ppo=request.args.get("ppo"),
+            jo=request.args.get("jo"),
+            color_code=request.args.get("color_code"),
+            limit=request.args.get("limit", 5000),
+            offset=request.args.get("offset", 0),
+        )
+    except CoiPostgresError as exc:
+        result = {"ok": False, "error": str(exc), "storage_source": "postgres"}
     return jsonify(result), (200 if result.get("ok") else 502)
 
 

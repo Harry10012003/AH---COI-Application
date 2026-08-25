@@ -6,7 +6,6 @@ export default function GOSelector() {
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [goList, setGoList] = useState([])
-  const [total, setTotal] = useState(0)
   const [coiReadyFilter, setCoiReadyFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -26,7 +25,6 @@ export default function GOSelector() {
         const data = await fetchGoList({ search, coiReady: coiReadyFilter })
         if (sequence !== requestSequence.current) return
         setGoList(data?.rows || [])
-        setTotal(data?.total || 0)
       } catch (e) {
         if (sequence === requestSequence.current) setError(e.message)
       } finally {
@@ -64,8 +62,22 @@ export default function GOSelector() {
   return (
     <div className="go-selector">
       <div className="card go-selector-card">
-        <h1>COI Workspace</h1>
-        <p>Select a GO or enter a GO number to start working. {total > 0 && `${total} GO available`}</p>
+        <div className="go-selector-heading">
+          <h1>COI Workspace</h1>
+          <div className="flex gap-8 items-center">
+            <label htmlFor="coi-ready-filter" className="filter-label">COI data</label>
+            <select
+              id="coi-ready-filter"
+              className="input go-ready-filter"
+              value={coiReadyFilter}
+              onChange={(e) => handleCoiReadyFilter(e.target.value)}
+            >
+              <option value="all">All GO</option>
+              <option value="ready">COI Available</option>
+              <option value="not_ready">COI Waiting / Blocked</option>
+            </select>
+          </div>
+        </div>
 
         <form onSubmit={handleQuickGo} className="flex gap-8 mb-12">
           <input
@@ -77,20 +89,6 @@ export default function GOSelector() {
           />
           <button type="submit" className="btn btn-primary">Go</button>
         </form>
-        <div className="flex gap-8 mb-12 items-center">
-          <label htmlFor="coi-ready-filter" className="filter-label">COI data</label>
-          <select
-            id="coi-ready-filter"
-            className="input go-ready-filter"
-            value={coiReadyFilter}
-            onChange={(e) => handleCoiReadyFilter(e.target.value)}
-          >
-            <option value="all">All GO</option>
-            <option value="ready">COI Available</option>
-            <option value="not_ready">COI Waiting / Blocked</option>
-          </select>
-        </div>
-
         {loading && (
           <div className="loading-screen">
             <div className="spinner" />

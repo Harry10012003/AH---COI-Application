@@ -1,7 +1,15 @@
 import { useState, useEffect, useCallback, memo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { fetchCoiSheet, saveCoiEdits, refreshPpo, issueCoi, exportCoiExcel } from '../api'
+import { fetchCoiSheet, saveCoiEdits, refreshPpo, applyPpoRefresh, issueCoi, exportCoiExcel } from '../api'
 import { useAuth } from '../auth-context'
+
+function headerGroup(column) {
+  const key = String(column?.key || column?.letter || '').toUpperCase()
+  if (key.includes('QTY') || key.includes("Q'TY") || key.includes('ALLOCATE') || key.includes('SHORTAGE') || key.includes('%')) return 'metrics'
+  if (key.includes('COLOR')) return 'color'
+  if (key.includes('JOB') || key.includes('LOT') || key.includes('SIZE') || key.includes('DATE')) return 'order'
+  return 'identity'
+}
 
 const SheetRow = memo(function SheetRow({ row, columns, editableFields, canEdit, edits, onCellEdit }) {
   const editableFieldSet = editableFields
@@ -19,7 +27,7 @@ const SheetRow = memo(function SheetRow({ row, columns, editableFields, canEdit,
             contentEditable={editable}
             suppressContentEditableWarning
             onBlur={(e) => {
-              if (editable) onCellEdit(row._row_key, colKey, e.target.textContent)
+              if (editable) onCellEdit(row._row_key, colKey, e.target.textContent, row._storage, row[colKey])
             }}
             style={colKey === 'PPO' ? { color: 'var(--primary)', cursor: 'pointer', fontWeight: 600 } : {}}
           >
@@ -41,6 +49,8 @@ export default function COIWorkspace() {
   const [error, setError] = useState('')
   const [toast, setToast] = useState(null)
   const [edits, setEdits] = useState({})
+  const [refreshPreview, setRefreshPreview] = useState(null)
+  const [applyingPreview, setApplyingPreview] = useState(false)
 
   const loadSheet = useCallback(async () => {
     if (!go) return
@@ -64,15 +74,15 @@ export default function COIWorkspace() {
     setTimeout(() => setToast(null), 3000)
   }
 
-  const handleCellEdit = useCallback((rowKey, colKey, value) => {
+  const handleCellEdit = useCallback((rowKey, colKey, value, storage, originalValue) => {
     setEdits((prev) => {
       const key = `${rowKey}|${colKey}`
-      if (value === '' || value === null) {
+      if (String(value ?? '') === String(originalValue ?? '')) {
         const next = { ...prev }
         delete next[key]
         return next
       }
-      return { ...prev, [key]: { row_key: rowKey, field: colKey, value } }
+      return { ...prev, [key]: { row_key: rowKey, storage: storage || {}, field: colKey, value } }
     })
   }, [])
 
@@ -91,11 +101,30 @@ export default function COIWorkspace() {
 
   const handleRefreshPpo = async () => {
     try {
-      await refreshPpo(go)
-      showToast('PPO refreshed', 'success')
+      const result = await refreshPpo(go)
+      if (result?.preview_required) {
+        setRefreshPreview(result)
+      } else {
+        showToast('PPO refreshed', 'success')
+        loadSheet()
+      }
+    } catch (e) {
+      showToast(e.message, 'error')
+    }
+  }
+
+  const handleApplyRefresh = async () => {
+    if (!refreshPreview?.preview_id) return
+    setApplyingPreview(true)
+    try {
+      const result = await applyPpoRefresh(go, refreshPreview.preview_id)
+      setRefreshPreview(null)
+      showToast(result?.message || 'PPO refresh applied', 'success')
       loadSheet()
     } catch (e) {
       showToast(e.message, 'error')
+    } finally {
+      setApplyingPreview(false)
     }
   }
 
@@ -139,13 +168,13 @@ export default function COIWorkspace() {
     <div className="flex flex-col" style={{ height: '100%' }}>
       <div className="coi-toolbar">
         <span className="go-title">GO #{go}</span>
-        <button className="btn btn-primary" onClick={loadSheet}>Refresh</button>
-        {canEdit && <button className="btn btn-primary" onClick={handleRefreshPpo}>Refresh PPO</button>}
-        {canEdit && <button className="btn btn-primary" onClick={handleExportExcel}>Export Excel</button>}
-        {canEdit && <button className="btn btn-primary" onClick={handleIssueCoi}>ISSUE COI</button>}
+        <button className="btn coi-action-button action-refresh" onClick={loadSheet}>1 Refresh</button>
+        {canEdit && <button className="btn coi-action-button action-ppo" onClick={handleRefreshPpo}>2 Refresh PPO</button>}
+        {canEdit && <button className="btn coi-action-button action-export" onClick={handleExportExcel}>3 Export Excel</button>}
+        {canEdit && <button className="btn coi-action-button action-issue" onClick={handleIssueCoi}>4 ISSUE COI</button>}
         {!canEdit && <span className="read-only-note">Read-only access</span>}
         {canEdit && Object.keys(edits).length > 0 && (
-          <button className="btn btn-primary" onClick={handleSaveEdits}>
+          <button className="btn coi-action-button action-save" onClick={handleSaveEdits}>
             Save ({Object.keys(edits).length})
           </button>
         )}
@@ -166,7 +195,7 @@ export default function COIWorkspace() {
           <thead>
             <tr>
               {columns.map((col) => (
-                <th key={col.key || col.letter}>{col.label || col.key || col.letter}</th>
+                <th className={`sheet-header-${headerGroup(col)}`} key={col.key || col.letter}>{col.label || col.key || col.letter}</th>
               ))}
             </tr>
           </thead>
@@ -189,6 +218,31 @@ export default function COIWorkspace() {
       {toast && (
         <div className="toast-container">
           <div className={`toast ${toast.type}`}>{toast.msg}</div>
+        </div>
+      )}
+
+      {refreshPreview && (
+        <div className="coi-preview-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setRefreshPreview(null)}>
+          <section className="coi-preview-modal" role="dialog" aria-modal="true" aria-labelledby="coi-preview-title">
+            <div>
+              <p className="eyebrow">SOURCE REFRESH PREVIEW</p>
+              <h2 id="coi-preview-title">Apply PPO refresh for {go}?</h2>
+              <p>PostgreSQL has not been changed. Review the summary before applying.</p>
+            </div>
+            <div className="coi-preview-summary">
+              <span><strong>{refreshPreview.diff?.added_row_count || 0}</strong> rows added</span>
+              <span><strong>{refreshPreview.diff?.removed_row_count || 0}</strong> rows removed</span>
+              <span><strong>{refreshPreview.diff?.changed_row_count || 0}</strong> rows changed</span>
+              <span><strong>{refreshPreview.diff?.change_count || 0}</strong> field changes</span>
+            </div>
+            <p className="coi-preview-note">AH Allocate and User Remark values are preserved. If this GO changes before Apply, the request will be rejected and you must preview again.</p>
+            <div className="coi-preview-actions">
+              <button className="btn" onClick={() => setRefreshPreview(null)} disabled={applyingPreview}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleApplyRefresh} disabled={applyingPreview}>
+                {applyingPreview ? 'Applying...' : 'Apply refresh'}
+              </button>
+            </div>
+          </section>
         </div>
       )}
     </div>

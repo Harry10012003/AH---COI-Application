@@ -41,17 +41,6 @@ MES_CUTTING_SITES = [
 MES_WIPDATA_URL = "http://192.168.152.2/MES/WIPData.asp"
 MES_CUTTING_RPT_URL = "http://192.168.152.2/MES_EAV/CuttingRptForSC.asp?SCNO={go}"
 EDGE_CDP_URL = os.getenv("EDGE_CDP_URL", "http://127.0.0.1:9222")
-SHAREPOINT_COI_FOLDER_URL = os.getenv(
-    "SHAREPOINT_COI_FOLDER_URL",
-    "https://esquel-my.sharepoint.com/shared?id=%2Fsites%2FEGV%5FEAV%5FPPC%2FShared%20Documents%2FCOI%20PPC&listurl=https%3A%2F%2Fesquel%2Esharepoint%2Ecom%2Fsites%2FEGV%5FEAV%5FPPC%2FShared%20Documents",
-)
-ONEDRIVE_COI_FOLDER_PATH = Path(
-    os.getenv(
-        "ONEDRIVE_COI_FOLDER_PATH",
-        r"C:\Users\kiddy.nguyen\OneDrive - Esquel Group\EGV_EAV_PPC - Documents\COI PPC",
-    )
-).expanduser()
-
 _GW_CREDENTIAL = resolve_credential(
     user_env="GW_LOGIN_USER",
     password_env="GW_LOGIN_PASSWORD",
@@ -220,8 +209,6 @@ def get_source_map(include_sensitive: bool = False) -> dict:
             "mes_cutting_sites": MES_CUTTING_SITES,
             "mes_wipdata": MES_WIPDATA_URL,
             "edge_cdp": EDGE_CDP_URL,
-            "sharepoint_coi": SHAREPOINT_COI_FOLDER_URL,
-            "onedrive_coi_folder": str(ONEDRIVE_COI_FOLDER_PATH),
         },
         "fabric_excel_columns": {
             "A": "Warehouse",

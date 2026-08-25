@@ -379,7 +379,7 @@ class AppSecurityBoundaryTests(unittest.TestCase):
         }
         with (
             mock.patch.object(app_module, "_CUTTING_COI_API_ALLOWED_ORIGINS", {"*"}),
-            mock.patch.object(app_module, "get_latest_issued_coi_feed", return_value=feed) as get_feed,
+            mock.patch.object(app_module, "get_latest_current_feed", return_value=feed) as get_feed,
             mock.patch.object(app_module, "start_background_services") as start,
         ):
             response = self.client.get(
