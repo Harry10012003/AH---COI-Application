@@ -25,6 +25,7 @@ def _connect():
     LIVE_SHEET_STORE_DB.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(LIVE_SHEET_STORE_DB), timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     try:

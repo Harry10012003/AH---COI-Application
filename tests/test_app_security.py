@@ -27,7 +27,10 @@ class AppSecurityBoundaryTests(unittest.TestCase):
         self.assertIn("default-src 'self'", csp)
         self.assertIn("script-src 'self'", csp)
         self.assertIn("style-src 'self'", csp)
-        self.assertNotIn("'unsafe-inline'", csp)
+        self.assertIn("'unsafe-inline'", csp)
+        self.assertIn("base-uri 'self'", csp)
+        self.assertIn("frame-ancestors 'self'", csp)
+        self.assertIn("object-src 'none'", csp)
         response.close()
 
     def test_spa_deep_links_serve_frontend(self) -> None:

@@ -253,18 +253,26 @@ def _add_security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if "Content-Security-Policy" not in response.headers:
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
+            "default-src 'self'; base-uri 'self'; form-action 'self'; "
+            "frame-ancestors 'self'; object-src 'none'; img-src 'self' data: blob:; "
             "script-src 'self' 'unsafe-inline'; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
-            "img-src 'self' data:; "
             "connect-src 'self'"
         )
-    if request.path.startswith("/api/cutting/coi/"):
-        response.headers["Access-Control-Allow-Origin"] = "*"
+    if request.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store"
+    if request.path.startswith("/api/cutting/coi/"):
+        origin = str(request.headers.get("Origin") or "").strip().rstrip("/")
+        allow_any_origin = "*" in _CUTTING_COI_API_ALLOWED_ORIGINS
+        if allow_any_origin or (origin and origin in _CUTTING_COI_API_ALLOWED_ORIGINS):
+            response.headers["Access-Control-Allow-Origin"] = "*" if allow_any_origin else origin
+            response.headers["Vary"] = "Origin"
+            response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Token, Authorization"
     return response
 
 
@@ -505,31 +513,6 @@ def api_auth_me():
 def api_auth_logout():
     revoke_session(g.auth_token)
     return jsonify({"ok": True})
-
-
-@app.after_request
-def add_security_headers(response):
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
-    response.headers.setdefault("Referrer-Policy", "no-referrer")
-    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-    response.headers.setdefault(
-        "Content-Security-Policy",
-        "default-src 'self'; base-uri 'self'; form-action 'self'; "
-        "frame-ancestors 'self'; object-src 'none'; img-src 'self' data: blob:; "
-        "script-src 'self'; style-src 'self'; connect-src 'self'",
-    )
-    if request.path.startswith("/api/"):
-        response.headers.setdefault("Cache-Control", "no-store")
-    if request.path.startswith("/api/cutting/coi/"):
-        origin = str(request.headers.get("Origin") or "").strip().rstrip("/")
-        allow_any_origin = "*" in _CUTTING_COI_API_ALLOWED_ORIGINS
-        if origin and (allow_any_origin or origin in _CUTTING_COI_API_ALLOWED_ORIGINS):
-            response.headers["Access-Control-Allow-Origin"] = "*" if allow_any_origin else origin
-            response.headers["Vary"] = "Origin"
-            response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-Token, Authorization"
-    return response
 
 
 @app.errorhandler(413)
@@ -790,12 +773,7 @@ def api_sql_go_sheet_edits(go: str):
 
 @app.route("/api/sql/go/<go>/sheet/query-remark", methods=["POST"])
 def api_sql_go_sheet_query_remark(go: str):
-    payload = _json_payload()
-    result = query_coi_remarks_from_weekly(
-        go,
-        weekly_report_path=str(payload.get("weekly_report_path") or payload.get("weekly_report_link") or "").strip(),
-    )
-    return jsonify(result), (200 if result.get("ok") else 502)
+    return jsonify({"ok": False, "error": "Weekly remark query is not yet available"}), 501
 
 
 @app.route("/api/sql/go/<go>/issue", methods=["POST"])

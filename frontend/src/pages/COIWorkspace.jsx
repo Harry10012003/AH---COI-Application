@@ -1,7 +1,35 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, memo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { fetchCoiSheet, saveCoiEdits, refreshPpo, issueCoi, exportCoiExcel } from '../api'
 import { useAuth } from '../auth-context'
+
+const SheetRow = memo(function SheetRow({ row, columns, editableFields, canEdit, edits, onCellEdit }) {
+  const editableFieldSet = editableFields
+  return (
+    <tr>
+      {columns.map((col) => {
+        const colKey = col.key || col.letter
+        const editable = canEdit && editableFieldSet.has(colKey)
+        const editKey = `${row._row_key}|${colKey}`
+        const displayValue = edits[editKey]?.value ?? row[colKey] ?? ''
+        return (
+          <td
+            key={colKey}
+            className={editable ? 'editable' : ''}
+            contentEditable={editable}
+            suppressContentEditableWarning
+            onBlur={(e) => {
+              if (editable) onCellEdit(row._row_key, colKey, e.target.textContent)
+            }}
+            style={colKey === 'PPO' ? { color: 'var(--primary)', cursor: 'pointer', fontWeight: 600 } : {}}
+          >
+            {displayValue}
+          </td>
+        )
+      })}
+    </tr>
+  )
+})
 
 export default function COIWorkspace() {
   const { canEdit } = useAuth()
@@ -36,7 +64,7 @@ export default function COIWorkspace() {
     setTimeout(() => setToast(null), 3000)
   }
 
-  const handleCellEdit = (rowKey, colKey, value) => {
+  const handleCellEdit = useCallback((rowKey, colKey, value) => {
     setEdits((prev) => {
       const key = `${rowKey}|${colKey}`
       if (value === '' || value === null) {
@@ -46,7 +74,7 @@ export default function COIWorkspace() {
       }
       return { ...prev, [key]: { row_key: rowKey, field: colKey, value } }
     })
-  }
+  }, [])
 
   const handleSaveEdits = async () => {
     const editList = Object.values(edits)
@@ -144,28 +172,15 @@ export default function COIWorkspace() {
           </thead>
           <tbody>
             {rows.map((row, ri) => (
-              <tr key={row._row_key || ri}>
-                {columns.map((col) => {
-                  const colKey = col.key || col.letter
-                  const editable = canEdit && editableFields.has(colKey)
-                  const editKey = `${row._row_key}|${colKey}`
-                  const displayValue = edits[editKey]?.value ?? row[colKey] ?? ''
-                  return (
-                    <td
-                      key={colKey}
-                      className={editable ? 'editable' : ''}
-                      contentEditable={editable}
-                      suppressContentEditableWarning
-                      onBlur={(e) => {
-                        if (editable) handleCellEdit(row._row_key, colKey, e.target.textContent)
-                      }}
-                      style={colKey === 'PPO' ? { color: 'var(--primary)', cursor: 'pointer', fontWeight: 600 } : {}}
-                    >
-                      {displayValue}
-                    </td>
-                  )
-                })}
-              </tr>
+              <SheetRow
+                key={row._row_key || ri}
+                row={row}
+                columns={columns}
+                editableFields={editableFields}
+                canEdit={canEdit}
+                edits={edits}
+                onCellEdit={handleCellEdit}
+              />
             ))}
           </tbody>
         </table>

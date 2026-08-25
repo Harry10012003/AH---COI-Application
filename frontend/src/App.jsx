@@ -1,11 +1,14 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AuthProvider } from './AuthContext'
 import { useAuth } from './auth-context'
+import ErrorBoundary from './components/ErrorBoundary'
 import COIHome from './pages/COIHome'
 import GOSelector from './pages/GOSelector'
 import COIWorkspace from './pages/COIWorkspace'
 import Login from './pages/Login'
-import PreCoiWorkspace from './pages/PreCoiWorkspace'
+
+const PreCoiWorkspace = lazy(() => import('./pages/PreCoiWorkspace'))
 
 function PageLoader() {
   return <div className="loading-screen full-page"><div className="spinner" /><span>Loading...</span></div>
@@ -15,13 +18,13 @@ function ProtectedRoute({ children }) {
   const { loading, isAuthenticated } = useAuth()
   if (loading) return <PageLoader />
   if (!isAuthenticated) return <Navigate to="/login" replace />
-  return children
+  return <ErrorBoundary>{children}</ErrorBoundary>
 }
 
 function PreCoiRoute({ children }) {
   const { user } = useAuth()
   if (user?.username?.trim().toLowerCase() !== 'ah') return <Navigate to="/" replace />
-  return children
+  return <Suspense fallback={<PageLoader />}>{children}</Suspense>
 }
 
 function AppLayout() {

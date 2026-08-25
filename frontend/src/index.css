@@ -494,64 +494,6 @@ table.data-table {
   margin-right: 8px;
 }
 
-/* Material Toolbar */
-.material-toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
-  margin-bottom: 12px;
-}
-
-.toolbar-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: end;
-}
-
-/* Line Toolbar */
-.line-toolbar {
-  padding: 12px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
-  margin-bottom: 12px;
-}
-
-/* Modal */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.3);
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.modal {
-  background: var(--panel);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
-  max-width: 90vw;
-  max-height: 85vh;
-  overflow: auto;
-  padding: 20px;
-  min-width: 400px;
-}
-
-.modal h2 {
-  font-size: 18px;
-  font-weight: 800;
-  margin-bottom: 12px;
-}
-
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
